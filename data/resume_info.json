@@ -1,0 +1,105 @@
+{
+    "personal_info": {
+        "name": "Weijing Jay Lin",
+        "email": "your.email@example.com",
+        "phone": "Your Phone Number",
+        "linkedin": "https://linkedin.com/in/your-profile",
+        "github": "https://github.com/your-username",
+        "portfolio": "https://your-portfolio.com",
+        "location": "San Francisco Bay Area",
+        "work_authorization": "Authorized to work in the US"
+    },
+    "professional_summary": "Senior Software Engineer with X years of experience in full-stack development, specializing in building scalable web applications and leading engineering teams. Strong expertise in modern web technologies and cloud platforms.",
+    "experience": [
+        {
+            "title": "Senior Software Engineer",
+            "company": "Current Company",
+            "duration": "2020-Present",
+            "responsibilities": [
+                "Led development of microservices architecture",
+                "Managed team of 5 engineers",
+                "Improved system performance by 40%"
+            ]
+        },
+        {
+            "title": "Software Engineer",
+            "company": "Previous Company",
+            "duration": "2018-2020",
+            "responsibilities": [
+                "Developed RESTful APIs",
+                "Implemented CI/CD pipeline",
+                "Reduced deployment time by 60%"
+            ]
+        }
+    ],
+    "education": [
+        {
+            "degree": "B.S. Computer Science",
+            "institution": "San Jose State University",
+            "year": "2011",
+            "location": "San Jose, CA"
+        },
+        {
+            "degree": "A.S. Computer Science",
+            "institution": "City College of San Francisco",
+            "year": "2004",
+            "location": "San Francisco, CA"
+        }
+    ],
+    "skills": {
+        "programming_languages": [
+            "Python",
+            "JavaScript",
+            "Java",
+            "TypeScript"
+        ],
+        "frameworks": [
+            "React",
+            "Node.js",
+            "Django",
+            "Spring Boot"
+        ],
+        "databases": [
+            "PostgreSQL",
+            "MongoDB",
+            "Redis"
+        ],
+        "cloud_technologies": [
+            "AWS",
+            "Docker",
+            "Kubernetes",
+            "GCP"
+        ],
+        "tools": [
+            "Git",
+            "Jenkins",
+            "Jira",
+            "Terraform"
+        ]
+    },
+    "preferences": {
+        "job_type": "Full-time",
+        "work_environment": ["Remote", "Hybrid", "On-site"],
+        "preferred_location": "San Francisco Bay Area",
+        "years_of_experience": 5,
+        "current_title": "Senior Software Engineer",
+        "desired_role": "Senior Software Engineer / Lead Engineer",
+        "willing_to_relocate": true
+    },
+    "achievements": [
+        "Led successful migration of monolithic application to microservices",
+        "Reduced infrastructure costs by 30% through optimization",
+        "Published 3 technical articles on system architecture",
+        "Mentored 4 junior developers to senior positions"
+    ],
+    "certifications": [
+        {
+            "name": "AWS Certified Solutions Architect",
+            "year": "2023"
+        },
+        {
+            "name": "Google Cloud Professional Developer",
+            "year": "2022"
+        }
+    ]
+}

@@ -1,0 +1,8 @@
+selenium>=4.15.2
+webdriver_manager==4.0.1
+python-dotenv>=1.0.0
+opencv-python>=4.8.1
+numpy>=1.26.2
+Pillow>=10.1.0
+pytesseract>=0.3.10
+requests>=2.31.0

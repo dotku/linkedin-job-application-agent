@@ -1,0 +1,12 @@
+[project]
+name = "linkedin-job-application-agent"
+version = "0.1.0"
+description = "A LinkedIn job application agent that automates job application process"
+dependencies = [
+    "aiohttp",
+    "python-dotenv",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
