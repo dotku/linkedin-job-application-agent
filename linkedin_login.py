@@ -8,6 +8,7 @@ import os
 
 from utils.logger import setup_logger
 from utils.chrome_setup import ChromeSetup
+from utils.browser import check_browser_open
 
 # Set up logging
 logger = setup_logger(__name__, "linkedin_login")
@@ -102,6 +103,7 @@ class LinkedInLogin:
                         return True
                     
                     # Check if browser is still open
+                    check_browser_open(self.driver)
                     self.driver.current_url  # This will raise an exception if browser is closed
                     
                     # Check if verification is needed
@@ -142,6 +144,7 @@ class LinkedInLogin:
             
             for selector in quick_indicators:
                 try:
+                    check_browser_open(self.driver)
                     if self.driver.find_element(By.CSS_SELECTOR, selector):
                         return True
                 except:
@@ -165,6 +168,7 @@ class LinkedInLogin:
             
             for selector in feed_selectors:
                 try:
+                    check_browser_open(self.driver)
                     WebDriverWait(self.driver, 5).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, selector))
                     )
@@ -198,6 +202,7 @@ class LinkedInLogin:
             attempt += 1
             
             try:
+                check_browser_open(self.driver)
                 current_url = self.driver.current_url
                 
                 # Check if we hit rate limit
@@ -223,6 +228,7 @@ class LinkedInLogin:
                     logger.info(f"Still on verification page, waiting {verification_wait} seconds...")
                     # Check every 5 seconds during wait
                     for remaining in range(verification_wait, 0, -5):
+                        check_browser_open(self.driver)
                         current_url = self.driver.current_url
                         if "feed" in current_url or "/jobs" in current_url:
                             logger.info("Security check resolved during wait")
@@ -252,6 +258,7 @@ class LinkedInLogin:
                 logger.info(f"Login attempt {attempt}/{max_attempts}")
                 
                 # Check if we're on login page
+                check_browser_open(self.driver)
                 current_url = self.driver.current_url
                 if "linkedin.com/login" not in current_url:
                     logger.info("Not on login page, navigating to it...")
@@ -259,6 +266,7 @@ class LinkedInLogin:
                     time.sleep(3)
                 
                 # Clear fields first
+                check_browser_open(self.driver)
                 username = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.ID, "username"))
                 )
@@ -277,15 +285,18 @@ class LinkedInLogin:
                     return False
                 
                 # Enter credentials directly
+                check_browser_open(self.driver)
                 username.send_keys(email)
                 password.send_keys(pwd)
                 time.sleep(1)
                 
                 # Click login button
+                check_browser_open(self.driver)
                 login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
                 login_button.click()
                 
                 # Wait for security check
+                check_browser_open(self.driver)
                 if self.wait_for_security_check():
                     logger.info("Successfully logged in to LinkedIn")
                     return True

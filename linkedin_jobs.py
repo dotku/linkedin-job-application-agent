@@ -230,27 +230,20 @@ class LinkedInJobs:
             logger.info(f"Search attempt {attempt}/{max_attempts}")
             
             try:
-                # Go to jobs search page directly
-                self.driver.get("https://www.linkedin.com/jobs/search")
+                # Go to jobs search page with Easy Apply filter
+                search_url = (
+                    "https://www.linkedin.com/jobs/search/?"
+                    f"keywords={quote(self.keywords)}&"
+                    f"location={quote(self.location)}&"
+                    "f_AL=true"  # Easy Apply filter
+                )
+                logger.info(f"Navigating to search URL: {search_url}")
+                self.driver.get(search_url)
                 time.sleep(3)
                 
                 # Wait for search page to load
                 if not self.wait_for_search_page():
                     logger.error("Jobs search page did not load")
-                    continue
-                
-                # Verify and apply all filters
-                if not self.verify_and_apply_filters(self.keywords, self.location):
-                    logger.error("Failed to verify and apply filters")
-                    continue
-                
-                # Verify search conditions in URL
-                current_url = self.driver.current_url
-                encoded_keywords = quote(self.keywords)
-                encoded_location = quote(self.location)
-                
-                if encoded_keywords not in current_url or encoded_location not in current_url:
-                    logger.warning("Search conditions not in URL, retrying...")
                     continue
                 
                 # Wait for job listings to appear

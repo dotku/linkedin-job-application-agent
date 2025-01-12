@@ -2,41 +2,39 @@ import os
 import time
 import sys
 import logging
-from dotenv import load_dotenv
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException
 
+from config import Config
 from utils.logger import setup_logger
 from utils.chrome_setup import ChromeSetup
+from utils.browser import check_browser_open, cleanup_driver
 from utils.database import DatabaseManager
 from linkedin_login import LinkedInLogin
 from linkedin_jobs import LinkedInJobs
 from linkedin_apply import LinkedInApply
 
-# Set up logging
-logger = setup_logger(__name__, "linkedin_auto_apply")
+logger = setup_logger(__name__, "linkedin_auto_apply", level=Config.LOG_LEVEL)
 
 class LinkedInAutoApply:
     def __init__(self):
         """Initialize the LinkedIn Auto Apply Bot"""
-        # Load environment variables
-        load_dotenv('.env.local')
-        
-        self.driver = ChromeSetup.initialize_driver()
+        self.driver = ChromeSetup.initialize_driver(headless=Config.BROWSER_HEADLESS)
         if not self.driver:
             raise Exception("Failed to initialize Chrome driver")
         
-        # Get parameters from environment
-        self.keywords = os.getenv("JOB_SEARCH_KEYWORDS")
-        self.location = os.getenv("JOB_SEARCH_LOCATION")
-        self.max_jobs = int(os.getenv("MAX_JOBS", "25"))
+        # Get parameters from config
+        self.keywords = Config.JOB_SEARCH_KEYWORDS
+        self.location = Config.JOB_SEARCH_LOCATION
+        self.max_jobs = Config.MAX_JOBS
         
         if not self.keywords or not self.location:
-            raise ValueError("Missing JOB_SEARCH_KEYWORDS or JOB_SEARCH_LOCATION in .env.local")
+            raise ValueError("Missing JOB_SEARCH_KEYWORDS or JOB_SEARCH_LOCATION in environment config")
         
         logger.info(f"Initialized with keywords='{self.keywords}', location='{self.location}', max_jobs={self.max_jobs}")
+        logger.info(f"Running in {Config.ENV} mode")
 
     def get_database_stats(self):
         """Get statistics about the database"""
@@ -526,26 +524,26 @@ Database Statistics:
             # Initialize components
             self.login = LinkedInLogin(self.driver)
             self.jobs = LinkedInJobs(self.driver)
+            self.db = DatabaseManager()
             
             # Start from login page
-            self.check_browser_open()
+            check_browser_open(self.driver)
             self.driver.get("https://www.linkedin.com/login")
             time.sleep(3)
             
             # Login to LinkedIn
-            self.check_browser_open()
             if not self.login.login():
                 logger.error("Failed to login")
                 return False
                 
             # Search for jobs
-            self.check_browser_open()
+            check_browser_open(self.driver)
             if not self.jobs.search_jobs():
                 logger.error("Failed to search for jobs")
                 return False
                 
             # Start applying to jobs
-            self.check_browser_open()
+            check_browser_open(self.driver)
             self.apply_to_jobs()
             
             return True
@@ -555,7 +553,7 @@ Database Statistics:
             return False
             
         finally:
-            self.cleanup()
+            cleanup_driver(self.driver)
 
     def wait_for_element(self, by, selector, timeout=10):
         """Wait for an element to be present"""
