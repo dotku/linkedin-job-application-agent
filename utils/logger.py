@@ -19,7 +19,7 @@ def setup_logger(name: str = "linkedin_auto_apply", log_name: str = None, level:
     
     # Create formatters
     file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
-    console_formatter = logging.Formatter('%(levelname)s - %(message)s')
+    console_formatter = logging.Formatter('%(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
     
     # Always add console handler
     console_handler = logging.StreamHandler()
