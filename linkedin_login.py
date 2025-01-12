@@ -236,36 +236,76 @@ class LinkedInLogin:
                 
         return False
 
+    def attempt_login(self, max_attempts=3):
+        """Attempt to login with retries"""
+        attempt = 0
+        while attempt < max_attempts:
+            attempt += 1
+            try:
+                logger.info(f"Login attempt {attempt}/{max_attempts}")
+                
+                # Check if we're on login page
+                current_url = self.driver.current_url
+                if "linkedin.com/login" not in current_url:
+                    logger.info("Not on login page, navigating to it...")
+                    self.driver.get("https://www.linkedin.com/login")
+                    time.sleep(3)
+                
+                # Clear fields first
+                username = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "username"))
+                )
+                password = self.driver.find_element(By.ID, "password")
+                
+                username.clear()
+                password.clear()
+                time.sleep(1)
+                
+                # Enter credentials
+                email = os.getenv("LINKEDIN_EMAIL")
+                pwd = os.getenv("LINKEDIN_PASSWORD")
+                
+                if not email or not pwd:
+                    logger.error("Missing LinkedIn credentials in environment variables")
+                    return False
+                
+                # Type slowly to mimic human behavior
+                for char in email:
+                    username.send_keys(char)
+                    time.sleep(0.1)
+                
+                for char in pwd:
+                    password.send_keys(char)
+                    time.sleep(0.1)
+                
+                time.sleep(1)
+                
+                # Click login button
+                login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                login_button.click()
+                
+                # Wait for security check
+                if self.wait_for_security_check():
+                    logger.info("Successfully logged in to LinkedIn")
+                    return True
+                
+                logger.warning(f"Login attempt {attempt} failed, retrying...")
+                time.sleep(5)
+                
+            except Exception as e:
+                logger.error(f"Error during login attempt {attempt}: {str(e)}")
+                if attempt == max_attempts:
+                    return False
+                time.sleep(5)
+        
+        return False
+
     def login(self):
         """Login to LinkedIn"""
         try:
-            logger.info("Logging in to LinkedIn...")
-            
-            # Go to login page
-            self.driver.get("https://www.linkedin.com/login")
-            time.sleep(2)
-            
-            # Enter email
-            email_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.ID, "username"))
-            )
-            email_input.send_keys(os.getenv("LINKEDIN_EMAIL"))
-            
-            # Enter password
-            password_input = self.driver.find_element(By.ID, "password")
-            password_input.send_keys(os.getenv("LINKEDIN_PASSWORD"))
-            
-            # Click login button
-            login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            login_button.click()
-            
-            # Wait for security check
-            if not self.wait_for_security_check():
-                return False
-            
-            logger.info("Successfully logged in to LinkedIn")
-            return True
+            logger.info("Starting LinkedIn login process...")
+            return self.attempt_login()
             
         except Exception as e:
-            logger.error(f"Error during login: {str(e)}")
+            logger.error(f"Error during login process: {str(e)}")
             return False
