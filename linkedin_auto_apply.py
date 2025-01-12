@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 from dotenv import load_dotenv
 
@@ -15,14 +16,20 @@ logger = setup_logger(__name__, "linkedin_auto_apply")
 class LinkedInAutoApply:
     def __init__(self):
         """Initialize the LinkedIn Auto Apply Bot"""
+        # Load environment variables
+        load_dotenv('.env.local')
+        
         self.driver = ChromeSetup.initialize_driver()
         if not self.driver:
             raise Exception("Failed to initialize Chrome driver")
         
         # Get parameters from environment
-        self.keywords = os.getenv("JOB_KEYWORDS", "Software Engineer")
-        self.location = os.getenv("JOB_LOCATION", "United States")
+        self.keywords = os.getenv("JOB_SEARCH_KEYWORDS")
+        self.location = os.getenv("JOB_SEARCH_LOCATION")
         self.max_jobs = int(os.getenv("MAX_JOBS", "25"))
+        
+        if not self.keywords or not self.location:
+            raise ValueError("Missing JOB_SEARCH_KEYWORDS or JOB_SEARCH_LOCATION in .env.local")
         
         logger.info(f"Initialized with keywords='{self.keywords}', location='{self.location}', max_jobs={self.max_jobs}")
 

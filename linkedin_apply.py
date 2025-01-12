@@ -2,16 +2,24 @@ import logging
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.common.keys import Keys
 import time
+import os
 import json
 from ai_assistant import AIJobAssistant
 from selenium.webdriver.support.select import Select
 
-logger = logging.getLogger(__name__)
+from utils.logger import setup_logger
+from utils.chrome_setup import ChromeSetup
+
+# Set up logger
+logger = setup_logger("linkedin_apply")
 
 class LinkedInApply:
-    def __init__(self, driver, db_manager=None):
-        self.driver = driver
+    def __init__(self, driver=None, db_manager=None):
+        """Initialize LinkedIn Apply"""
+        self.driver = driver or ChromeSetup.initialize_driver()
         self.wait = WebDriverWait(self.driver, 10)
         self.db_manager = db_manager
         self.ai_assistant = AIJobAssistant()
@@ -21,6 +29,10 @@ class LinkedInApply:
         try:
             # First, get the job description
             try:
+                # Wait for job details to load
+                self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.jobs-description")))
+                time.sleep(2)  # Give extra time for content to load
+                
                 description_elem = self.driver.find_element(By.CSS_SELECTOR, "div.jobs-description")
                 page_source = description_elem.get_attribute('innerHTML')
                 
@@ -45,12 +57,16 @@ class LinkedInApply:
             except Exception as e:
                 logger.warning(f"Could not analyze job with AI: {str(e)}")
             
-            # Check for Easy Apply button with multiple selectors
+            # Check for Easy Apply button with multiple selectors and strategies
             easy_apply_selectors = [
-                "button.jobs-apply-button",  # Standard Easy Apply button
-                "button[aria-label*='Easy Apply']",  # Button with Easy Apply in aria-label
-                "button.jobs-apply-button--top-card",  # Top card Easy Apply button
-                "button[data-control-name='jobdetails_topcard_inapply']",  # Another Easy Apply variant
+                "button.jobs-apply-button",
+                "button[aria-label*='Easy Apply']",
+                "button.jobs-apply-button--top-card",
+                "button[data-control-name='jobdetails_topcard_inapply']",
+                ".jobs-apply-button--top-card",
+                ".jobs-s-apply button",
+                "//*[contains(@class, 'jobs-apply-button')]",  # XPath
+                "//*[contains(text(), 'Easy Apply')]"  # XPath for text content
             ]
             
             time.sleep(3)  # Wait before looking for button
@@ -58,41 +74,54 @@ class LinkedInApply:
             # Try each selector
             for selector in easy_apply_selectors:
                 try:
-                    easy_apply_button = self.driver.find_element(By.CSS_SELECTOR, selector)
-                    if easy_apply_button and easy_apply_button.is_enabled():
+                    # Try both CSS and XPath selectors
+                    if selector.startswith("/"):
+                        easy_apply_button = self.driver.find_element(By.XPATH, selector)
+                    else:
+                        easy_apply_button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    
+                    if easy_apply_button and easy_apply_button.is_displayed() and easy_apply_button.is_enabled():
                         logger.info(f"Found Easy Apply button with selector: {selector}")
                         
-                        # Scroll to button
+                        # Scroll to button to ensure it's in view
                         self.driver.execute_script("arguments[0].scrollIntoView(true);", easy_apply_button)
-                        time.sleep(3)  # Wait after scroll
+                        time.sleep(2)  # Wait after scroll
                         
-                        # Try to click with JavaScript first
-                        try:
-                            self.driver.execute_script("arguments[0].click();", easy_apply_button)
-                        except:
-                            # If JS click fails, try regular click
-                            easy_apply_button.click()
+                        # Try multiple click strategies
+                        click_successful = False
+                        click_methods = [
+                            lambda: self.driver.execute_script("arguments[0].click();", easy_apply_button),
+                            lambda: easy_apply_button.click(),
+                            lambda: self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector))).click()
+                        ]
                         
-                        logger.info("Clicked Easy Apply button")
-                        time.sleep(3)  # Wait after click
+                        for click_method in click_methods:
+                            try:
+                                click_method()
+                                time.sleep(2)  # Wait after click
+                                
+                                # Verify if the Easy Apply modal appeared
+                                if self.wait.until(EC.presence_of_element_located(
+                                    (By.CSS_SELECTOR, "div[data-test-modal-id='easy-apply-modal']"))):
+                                    click_successful = True
+                                    break
+                            except Exception as e:
+                                logger.debug(f"Click method failed: {str(e)}")
+                                continue
                         
-                        # Handle application form
-                        if self.fill_application_form():
-                            time.sleep(3)  # Wait after form submission
-                            # Log successful application
-                            if self.db_manager:
-                                self.db_manager.log_application(
-                                    job_id=job_data.get('id', ''),
-                                    status="APPLIED",
-                                    job_data=job_data
-                                )
-                            return True
-                        break
+                        if click_successful:
+                            logger.info("Successfully clicked Easy Apply button and modal appeared")
+                            
+                            # Handle the application process
+                            if self.handle_easy_apply_process():
+                                time.sleep(2)
+                                return True
+                            break
                 except Exception as e:
                     logger.debug(f"Button not found with selector {selector}: {str(e)}")
                     continue
             
-            logger.info("No enabled Easy Apply button found")
+            logger.info("No enabled Easy Apply button found or failed to click it")
             return False
             
         except Exception as e:
@@ -100,9 +129,9 @@ class LinkedInApply:
             if self.db_manager:
                 self.db_manager.log_application(
                     job_id=job_data.get('id', ''),
-                    status="FAILED",
-                    error_message=str(e),
-                    job_data=job_data
+                    status="ERROR",
+                    job_data=job_data,
+                    error=str(e)
                 )
             return False
 
@@ -296,4 +325,87 @@ class LinkedInApply:
             
         except Exception as e:
             logger.error(f"Error checking application completion: {str(e)}")
+            return False
+
+    def handle_easy_apply_process(self):
+        """Handle the Easy Apply process after clicking the button"""
+        try:
+            # Wait for the modal to appear and any loading to finish
+            self.wait.until(EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "div[data-test-modal-id='easy-apply-modal']")))
+            time.sleep(2)  # Wait for modal to fully load
+            
+            while True:  # Loop through all steps
+                # Wait for any loading to finish
+                self.wait_for_loading_modal()
+                time.sleep(1)  # Extra wait to ensure form is loaded
+                
+                # First try to find Submit Application button
+                try:
+                    submit_buttons = self.driver.find_elements(By.CSS_SELECTOR, 
+                        "button[aria-label='Submit application'], " + 
+                        "button[type='submit']")
+                    
+                    for button in submit_buttons:
+                        if button.is_displayed() and button.is_enabled() and (
+                            "submit" in button.text.lower() or 
+                            "submit" in button.get_attribute("aria-label").lower()):
+                            logger.info("Found Submit Application button")
+                            
+                            # Try to click the submit button
+                            try:
+                                self.driver.execute_script("arguments[0].click();", button)
+                            except:
+                                button.click()
+                            
+                            time.sleep(2)  # Wait after submit
+                            
+                            # Check for success modal
+                            try:
+                                success = self.wait.until(EC.presence_of_element_located(
+                                    (By.XPATH, "//*[contains(text(), 'application was sent')]")))
+                                if success:
+                                    logger.info("Application submitted successfully")
+                                    return True
+                            except:
+                                logger.warning("No success message found after submit")
+                            
+                            return False
+                    
+                except Exception as e:
+                    logger.debug(f"Submit button not found: {str(e)}")
+                
+                # If no Submit button, look for Next button
+                try:
+                    next_buttons = self.driver.find_elements(By.CSS_SELECTOR,
+                        "button[aria-label*='Continue to next step'], " +
+                        "button[aria-label*='Next'], " +
+                        "button[type='button']")
+                    
+                    for button in next_buttons:
+                        if button.is_displayed() and button.is_enabled() and (
+                            "next" in button.text.lower() or 
+                            "continue" in button.text.lower() or
+                            "next" in button.get_attribute("aria-label").lower()):
+                            
+                            logger.info("Found Next button, continuing to next step")
+                            
+                            # Try to click the next button
+                            try:
+                                self.driver.execute_script("arguments[0].click();", button)
+                            except:
+                                button.click()
+                            
+                            time.sleep(2)  # Wait after clicking next
+                            continue  # Go to next step
+                            
+                except Exception as e:
+                    logger.debug(f"Next button not found: {str(e)}")
+                
+                # If we get here, we couldn't find either button
+                logger.warning("Could not find Submit or Next button")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error in Easy Apply process: {str(e)}")
             return False

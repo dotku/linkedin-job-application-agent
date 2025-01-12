@@ -10,6 +10,7 @@ from selenium.webdriver.common.keys import Keys
 from urllib.parse import quote
 import time
 import os
+from dotenv import load_dotenv
 
 from utils.logger import setup_logger
 from utils.chrome_setup import ChromeSetup
@@ -24,9 +25,13 @@ class LinkedInJobs:
         self.wait = WebDriverWait(self.driver, 10)  # Default 10 second wait
         
         # Get search parameters from environment
-        self.keywords = os.getenv("JOB_KEYWORDS", "Software Engineer").strip()
-        self.location = os.getenv("JOB_LOCATION", "United States").strip()
+        load_dotenv('.env.local')
+        self.keywords = os.getenv("JOB_SEARCH_KEYWORDS")
+        self.location = os.getenv("JOB_SEARCH_LOCATION")
         self.max_jobs = int(os.getenv("MAX_JOBS", "25"))
+        
+        if not self.keywords or not self.location:
+            raise ValueError("Missing JOB_SEARCH_KEYWORDS or JOB_SEARCH_LOCATION in .env.local")
         
         logger.info(f"Initialized with keywords='{self.keywords}', location='{self.location}', max_jobs={self.max_jobs}")
 

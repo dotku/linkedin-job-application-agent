@@ -221,7 +221,14 @@ class LinkedInLogin:
                 # Still on verification page
                 if any(x in current_url for x in ["checkpoint", "challenge", "verification"]):
                     logger.info(f"Still on verification page, waiting {verification_wait} seconds...")
-                    self.wait_with_countdown(verification_wait)
+                    # Check every 5 seconds during wait
+                    for remaining in range(verification_wait, 0, -5):
+                        current_url = self.driver.current_url
+                        if "feed" in current_url or "/jobs" in current_url:
+                            logger.info("Security check resolved during wait")
+                            return True
+                        logger.info(f"Verification page cooldown: {remaining} seconds remaining...")
+                        time.sleep(5)
                     continue
                 
                 # Unknown page
