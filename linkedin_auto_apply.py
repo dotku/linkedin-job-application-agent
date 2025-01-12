@@ -14,25 +14,17 @@ logger = setup_logger(__name__, "linkedin_auto_apply")
 
 class LinkedInAutoApply:
     def __init__(self):
-        """Initialize LinkedIn Auto Apply Bot"""
-        logger.info("Initializing LinkedIn Auto Apply bot...")
-        self.driver = None
-        self.db = DatabaseManager()
+        """Initialize the LinkedIn Auto Apply Bot"""
+        self.driver = ChromeSetup.initialize_driver()
+        if not self.driver:
+            raise Exception("Failed to initialize Chrome driver")
         
-        try:
-            load_dotenv('.env.local')
-            self.email = os.getenv('LINKEDIN_EMAIL')
-            self.password = os.getenv('LINKEDIN_PASSWORD')
-            self.keywords = os.getenv('JOB_KEYWORDS', '')
-            self.location = os.getenv('JOB_LOCATION', '')
-            self.max_jobs = int(os.getenv('MAX_JOBS', 5))
-            
-            if not all([self.email, self.password]):
-                raise ValueError("Missing required environment variables")
-                
-        except Exception as e:
-            logger.error(f"Error initializing bot: {str(e)}")
-            raise
+        # Get parameters from environment
+        self.keywords = os.getenv("JOB_KEYWORDS", "Software Engineer")
+        self.location = os.getenv("JOB_LOCATION", "United States")
+        self.max_jobs = int(os.getenv("MAX_JOBS", "25"))
+        
+        logger.info(f"Initialized with keywords='{self.keywords}', location='{self.location}', max_jobs={self.max_jobs}")
 
     def get_database_stats(self):
         """Get statistics about the database"""
@@ -488,22 +480,20 @@ Database Statistics:
             logger.error(f"Error checking login status: {str(e)}")
             return False
 
-    def setup_driver(self):
-        """Setup Chrome WebDriver"""
-        try:
-            logger.info("Setting up Chrome WebDriver...")
-            self.driver = ChromeSetup.initialize_driver()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to setup Chrome WebDriver: {str(e)}")
-            return False
-
     def run(self):
         """Run the LinkedIn auto apply process"""
         try:
+            if not self.driver:
+                logger.error("Chrome driver not initialized")
+                return False
+            
             # Initialize components
             self.login = LinkedInLogin(self.driver)
             self.jobs = LinkedInJobs(self.driver)
+            
+            # Start from login page
+            self.driver.get("https://www.linkedin.com/login")
+            time.sleep(3)
             
             # Login to LinkedIn
             if not self.login.login():
@@ -525,7 +515,11 @@ Database Statistics:
             return False
             
         finally:
-            self.close()
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
 
     def wait_for_element(self, by, selector, timeout=10):
         """Wait for an element to be present"""
