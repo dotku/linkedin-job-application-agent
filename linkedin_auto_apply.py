@@ -21,7 +21,7 @@ logger = setup_logger(__name__, "linkedin_auto_apply", level=Config.LOG_LEVEL)
 class LinkedInAutoApply:
     def __init__(self):
         """Initialize the LinkedIn Auto Apply Bot"""
-        self.driver = ChromeSetup.initialize_driver(headless=Config.BROWSER_HEADLESS)
+        self.driver = ChromeSetup().initialize_driver(headless=Config.BROWSER_HEADLESS)
         if not self.driver:
             raise Exception("Failed to initialize Chrome driver")
         

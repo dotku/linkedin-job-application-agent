@@ -40,9 +40,8 @@ class ChromeSetup:
             chrome_options.add_argument('--start-maximized')
             chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
             
-            # Initialize driver with options
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Initialize driver with options using Selenium Manager
+            driver = webdriver.Chrome(options=chrome_options)
             
             logger.info("Chrome WebDriver initialized successfully")
             return driver
