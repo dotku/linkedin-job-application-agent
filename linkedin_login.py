@@ -2,16 +2,22 @@ import logging
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, NoSuchFrameException
+from selenium.common.exceptions import TimeoutException
 import time
+import os
 
-logger = logging.getLogger(__name__)
+from utils.logger import setup_logger
+from utils.chrome_setup import ChromeSetup
+
+# Set up logging
+logger = setup_logger(__name__, "linkedin_login")
 
 class LinkedInLogin:
-    def __init__(self, driver, email, password):
-        self.driver = driver
-        self.email = email
-        self.password = password
+    def __init__(self, driver=None):
+        """Initialize LinkedIn Login"""
+        self.driver = driver or ChromeSetup.initialize_driver()
+        self.email = os.getenv('LINKEDIN_EMAIL')
+        self.password = os.getenv('LINKEDIN_PASSWORD')
         self.wait = WebDriverWait(self.driver, 3)  # Reduce default wait time to 3 seconds
 
     def wait_for_element(self, by, value, timeout=10, condition=EC.presence_of_element_located):
@@ -82,10 +88,12 @@ class LinkedInLogin:
                 pass
             return False
 
-    def wait_for_verification_completion(self, timeout=300):
+    def wait_for_verification_completion(self, timeout=None):
         """Wait until the security verification is completed"""
         try:
             start_time = time.time()
+            verification_start = False
+            
             while True:
                 try:
                     # Check if we're already logged in
@@ -96,20 +104,30 @@ class LinkedInLogin:
                     # Check if browser is still open
                     self.driver.current_url  # This will raise an exception if browser is closed
                     
-                    # Check if we've exceeded the timeout
-                    if time.time() - start_time > timeout:
-                        logger.error("Verification timed out")
-                        return False
+                    # Check if verification is needed
+                    if self.check_for_security_verification():
+                        if not verification_start:
+                            logger.info("Security verification detected - waiting for completion...")
+                            verification_start = True
+                        else:
+                            logger.info("Still waiting for verification completion...")
+                    
+                    # Only check timeout if specified
+                    if timeout and time.time() - start_time > timeout:
+                        logger.warning("Verification is taking longer than usual, but continuing to wait...")
                     
                     # Sleep a bit before checking again
-                    time.sleep(2)
+                    time.sleep(5)
                     
                 except Exception as e:
-                    logger.error(f"Browser closed during verification: {str(e)}")
-                    return False
+                    if "invalid session id" in str(e).lower() or "no such window" in str(e).lower():
+                        logger.error("Browser was closed during verification")
+                        return False
+                    logger.warning(f"Error during verification check: {str(e)}, continuing to wait...")
+                    time.sleep(5)
                 
         except Exception as e:
-            logger.error(f"Error in verification completion: {str(e)}")
+            logger.error(f"Critical error in verification completion: {str(e)}")
             return False
 
     def check_login_status(self):
@@ -135,51 +153,119 @@ class LinkedInLogin:
             logger.error(f"Error checking login status: {str(e)}")
             return False
 
+    def verify_feed_page(self):
+        """Verify that the LinkedIn feed page has loaded successfully"""
+        try:
+            # Wait for feed page elements
+            feed_selectors = [
+                ".feed-shared-update-v2",  # Feed posts
+                ".feed-shared-news-module",  # News module
+                ".feed-shared-actor"  # Post author info
+            ]
+            
+            for selector in feed_selectors:
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    logger.info(f"Feed element found: {selector}")
+                    return True
+                except TimeoutException:
+                    continue
+            
+            logger.warning("Could not verify all feed elements")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error verifying feed page: {str(e)}")
+            return False
+
+    def wait_with_countdown(self, seconds):
+        """Wait with countdown display"""
+        for remaining in range(seconds, 0, -1):
+            logger.info(f"Rate limit cooldown: {remaining} seconds remaining...")
+            time.sleep(1)
+
+    def wait_for_security_check(self):
+        """Wait for security check to be resolved"""
+        logger.info("Waiting for security check to be resolved...")
+        
+        max_attempts = 3
+        attempt = 0
+        verification_wait = 60  # Wait 60 seconds on verification page
+        
+        while attempt < max_attempts:
+            attempt += 1
+            
+            try:
+                current_url = self.driver.current_url
+                
+                # Check if we hit rate limit
+                if "challengesV2/inapp/tooManyAttempts" in current_url:
+                    logger.warning("Hit rate limit, waiting 60 seconds before retry...")
+                    self.wait_with_countdown(60)
+                    self.driver.get("https://www.linkedin.com/login")
+                    time.sleep(3)
+                    return self.login()
+                
+                # Already on feed page
+                if "feed" in current_url:
+                    logger.info("Security check resolved - feed page loaded")
+                    return True
+                    
+                # Already on jobs page
+                if "/jobs" in current_url:
+                    logger.info("Security check resolved - jobs page loaded")
+                    return True
+                
+                # Still on verification page
+                if any(x in current_url for x in ["checkpoint", "challenge", "verification"]):
+                    logger.info(f"Still on verification page, waiting {verification_wait} seconds...")
+                    self.wait_with_countdown(verification_wait)
+                    continue
+                
+                # Unknown page
+                logger.warning(f"On unknown page: {current_url}")
+                time.sleep(5)
+                
+            except Exception as e:
+                logger.error(f"Error checking security status: {str(e)}")
+                if attempt == max_attempts:
+                    return False
+                time.sleep(5)
+                
+        return False
+
     def login(self):
         """Login to LinkedIn"""
         try:
-            # Navigate to login page if not already there
-            current_url = self.driver.current_url
-            if not current_url.startswith("https://www.linkedin.com"):
-                self.driver.get("https://www.linkedin.com/login")
+            logger.info("Logging in to LinkedIn...")
             
-            # Quick check if already logged in
-            if self.check_login_status():
-                logger.info("Already logged in")
-                return True
+            # Go to login page
+            self.driver.get("https://www.linkedin.com/login")
+            time.sleep(2)
             
-            # Try to find login form elements without waiting
-            try:
-                # Find all elements in one go to reduce lookups
-                form_elements = {
-                    'username': self.driver.find_element(By.ID, "username"),
-                    'password': self.driver.find_element(By.ID, "password"),
-                    'submit': self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-                }
-                
-                # Input credentials and submit quickly
-                form_elements['username'].send_keys(self.email)
-                form_elements['password'].send_keys(self.password)
-                form_elements['submit'].click()
-                
-                # Quick check for successful login (reduced wait)
-                for _ in range(2):  # Try twice with 0.5s interval
-                    if self.check_login_status():
-                        logger.info("Login successful")
-                        return True
-                    time.sleep(0.5)
-                
-                # If not logged in, check for verification
-                if self.check_for_security_verification():
-                    logger.info("Security verification required - proceeding without waiting")
-                    return True
-                    
+            # Enter email
+            email_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "username"))
+            )
+            email_input.send_keys(os.getenv("LINKEDIN_EMAIL"))
+            
+            # Enter password
+            password_input = self.driver.find_element(By.ID, "password")
+            password_input.send_keys(os.getenv("LINKEDIN_PASSWORD"))
+            
+            # Click login button
+            login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+            login_button.click()
+            
+            # Wait for security check
+            if not self.wait_for_security_check():
                 return False
-                
-            except Exception as e:
-                logger.error(f"Error during quick login: {str(e)}")
-                return False
+            
+            logger.info("Successfully logged in to LinkedIn")
+            return True
             
         except Exception as e:
-            logger.error(f"Login failed: {str(e)}")
+            logger.error(f"Error during login: {str(e)}")
             return False
