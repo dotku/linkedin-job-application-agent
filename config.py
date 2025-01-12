@@ -33,7 +33,8 @@ class Config:
     
     # Logging settings
     LOG_LEVEL = 'INFO' if ENV == 'production' else 'DEBUG'
-    LOG_DIR = '.logs'
+    LOG_MODE = os.getenv('LOG_MODE', 'file').lower()
+    LOG_DIR = '.logs' if LOG_MODE != 'print' else None
     
     @classmethod
     def is_production(cls):
@@ -46,3 +47,7 @@ class Config:
     @classmethod
     def is_staging(cls):
         return cls.ENV == 'staging'
+    
+    @classmethod
+    def should_log_to_file(cls):
+        return cls.LOG_MODE != 'print'

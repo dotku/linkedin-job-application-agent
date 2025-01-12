@@ -4,37 +4,39 @@ import os
 from datetime import datetime
 from typing import Any, Dict
 
-def setup_logger(name: str = "linkedin_auto_apply", log_file: str = None) -> logging.Logger:
+def setup_logger(name: str = "linkedin_auto_apply", log_name: str = None, level: int = logging.INFO) -> logging.Logger:
     """
     Set up logger with file and console handlers
     """
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(level)
     
-    # Only add handlers if they haven't been added yet
-    if not logger.handlers:
-        # Create formatters
-        file_formatter = logging.Formatter('%(asctime)s - %(name)s - [%(filename)s:%(lineno)d] - %(levelname)s - %(message)s')
-        console_formatter = logging.Formatter('%(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
+    # Clear any existing handlers
+    logger.handlers = []
+    
+    # Get log mode from environment
+    log_mode = os.getenv('LOG_MODE', 'file').lower()
+    
+    # Create formatters
+    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+    console_formatter = logging.Formatter('%(levelname)s - %(message)s')
+    
+    # Always add console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
+    
+    # Add file handler only if not in print mode
+    if log_mode != 'print':
+        # Create logs directory if it doesn't exist
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.logs')
+        os.makedirs(log_dir, exist_ok=True)
         
-        # Create console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
-        
-        # Create file handler if log_file specified
-        if log_file:
-            # Create .log directory if it doesn't exist
-            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.logs')
-            os.makedirs(log_dir, exist_ok=True)
-            
-            # Set up file handler with full path
-            log_path = os.path.join(log_dir, f"{log_file}.log")
-            file_handler = logging.FileHandler(log_path)
-            file_handler.setLevel(logging.INFO)
-            file_handler.setFormatter(file_formatter)
-            logger.addHandler(file_handler)
+        # Create file handler
+        log_file = os.path.join(log_dir, f"{log_name}_{datetime.now().strftime('%Y%m%d')}.log")
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
     
     return logger
 
