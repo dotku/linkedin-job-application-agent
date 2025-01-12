@@ -14,8 +14,8 @@ def setup_logger(name: str = "linkedin_auto_apply", log_file: str = None) -> log
     # Only add handlers if they haven't been added yet
     if not logger.handlers:
         # Create formatters
-        file_formatter = logging.Formatter('%(asctime)s - %(name)s:%(lineno)d - %(levelname)s - %(message)s')
-        console_formatter = logging.Formatter('%(levelname)s - %(name)s:%(lineno)d - %(message)s')
+        file_formatter = logging.Formatter('%(asctime)s - %(name)s - [%(filename)s:%(lineno)d] - %(levelname)s - %(message)s')
+        console_formatter = logging.Formatter('%(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
         
         # Create console handler
         console_handler = logging.StreamHandler()
