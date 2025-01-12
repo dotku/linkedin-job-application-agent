@@ -1,14 +1,14 @@
-# Environment variables
+# Environment files
 .env
 .env.local
+.env.production
+.env.staging
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
-venv/
 env/
 build/
 develop-eggs/
@@ -21,14 +21,24 @@ lib64/
 parts/
 sdist/
 var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Logs
+.logs/
+*.log
+
+# Database
+*.db
+*.sqlite3
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.logs
+
+# OS
+.DS_Store
+Thumbs.db
