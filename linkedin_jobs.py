@@ -230,8 +230,8 @@ class LinkedInJobs:
             logger.info(f"Search attempt {attempt}/{max_attempts}")
             
             try:
-                # Go to jobs page first
-                self.driver.get("https://www.linkedin.com/jobs/")
+                # Go to jobs search page directly
+                self.driver.get("https://www.linkedin.com/jobs/search")
                 time.sleep(3)
                 
                 # Wait for search page to load
