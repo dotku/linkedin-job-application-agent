@@ -276,15 +276,9 @@ class LinkedInLogin:
                     logger.error("Missing LinkedIn credentials in environment variables")
                     return False
                 
-                # Type slowly to mimic human behavior
-                for char in email:
-                    username.send_keys(char)
-                    time.sleep(0.1)
-                
-                for char in pwd:
-                    password.send_keys(char)
-                    time.sleep(0.1)
-                
+                # Enter credentials directly
+                username.send_keys(email)
+                password.send_keys(pwd)
                 time.sleep(1)
                 
                 # Click login button
