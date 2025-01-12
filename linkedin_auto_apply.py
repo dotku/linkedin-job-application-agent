@@ -1,181 +1,54 @@
 import os
-import time
 import logging
-import sqlite3
 from dotenv import load_dotenv
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (
-    TimeoutException,
-    NoSuchElementException,
-    ElementClickInterceptedException,
-    StaleElementReferenceException
-)
-import json
-import re
-import requests
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+
+from utils.logger import setup_logger
+from utils.chrome_setup import ChromeSetup
+from utils.database import DatabaseManager
 from linkedin_login import LinkedInLogin
 from linkedin_jobs import LinkedInJobs
 from linkedin_apply import LinkedInApply
-import datetime
-import base64
-import io
-from PIL import Image
-import cv2
-import numpy as np
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Set up logging
+logger = setup_logger(__name__, "linkedin_auto_apply")
 
 class LinkedInAutoApply:
     def __init__(self):
-        """Initialize the LinkedIn Auto Apply bot"""
+        """Initialize LinkedIn Auto Apply Bot"""
+        logger.info("Initializing LinkedIn Auto Apply bot...")
         self.driver = None
+        self.db = DatabaseManager()
+        
         try:
             load_dotenv('.env.local')
             self.email = os.getenv('LINKEDIN_EMAIL')
             self.password = os.getenv('LINKEDIN_PASSWORD')
-            self.job_search_keywords = os.getenv('JOB_SEARCH_KEYWORDS', 'Full Stack')
-            self.job_search_location = os.getenv('JOB_SEARCH_LOCATION', 'San Francisco Bay Area')
-            self.max_jobs = int(os.getenv('MAX_JOBS', '25'))
+            self.keywords = os.getenv('JOB_KEYWORDS', '')
+            self.location = os.getenv('JOB_LOCATION', '')
+            self.max_jobs = int(os.getenv('MAX_JOBS', 5))
             
-            if not self.email or not self.password:
-                raise ValueError("LinkedIn credentials not found in .env.local file")
-            
-            self.setup_driver()
-            self.login_handler = LinkedInLogin(self.driver, self.email, self.password)
-            self.jobs_handler = LinkedInJobs(self.driver)
-            self.apply_handler = LinkedInApply(self.driver)
-            
+            if not all([self.email, self.password]):
+                raise ValueError("Missing required environment variables")
+                
         except Exception as e:
-            logger.error(f"Initialization failed: {str(e)}")
+            logger.error(f"Error initializing bot: {str(e)}")
             raise
-
-    def setup_database(self):
-        """Setup SQLite database for storing form fields"""
-        try:
-            db_file = 'linkedin_applications.db'
-            # Log database location
-            db_path = os.path.abspath(db_file)
-            logger.info(f"Setting up database at: {db_path}")
-            
-            # Create database connection
-            self.conn = sqlite3.connect(db_file)
-            self.cursor = self.conn.cursor()
-            
-            # Create tables if they don't exist
-            self.cursor.execute('''
-                CREATE TABLE IF NOT EXISTS jobs (
-                    job_id TEXT PRIMARY KEY,
-                    company_name TEXT,
-                    company_url TEXT,
-                    job_title TEXT,
-                    job_description TEXT,
-                    job_location TEXT,
-                    salary_range TEXT,
-                    experience_level TEXT,
-                    employment_type TEXT,
-                    application_date TIMESTAMP,
-                    last_updated TIMESTAMP,
-                    status TEXT CHECK(status IN ('PENDING', 'SKIPPED', 'APPLIED', 'FAILED', 'ERROR')),
-                    failure_reason TEXT,
-                    job_url TEXT,
-                    num_applicants INTEGER,
-                    is_remote BOOLEAN,
-                    easy_apply BOOLEAN
-                )
-            ''')
-            
-            self.cursor.execute('''
-                CREATE TABLE IF NOT EXISTS form_fields (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT,
-                    field_type TEXT CHECK(field_type IN ('text', 'select', 'radio', 'checkbox', 'textarea', 'file', 'other')),
-                    field_name TEXT,
-                    field_label TEXT,
-                    field_value TEXT,
-                    field_options TEXT,
-                    is_required BOOLEAN,
-                    is_filled BOOLEAN,
-                    error_message TEXT,
-                    FOREIGN KEY (job_id) REFERENCES jobs (job_id)
-                )
-            ''')
-            
-            self.cursor.execute('''
-                CREATE TABLE IF NOT EXISTS application_attempts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT,
-                    attempt_date TIMESTAMP,
-                    status TEXT CHECK(status IN ('SUCCESS', 'FAILED', 'ERROR')),
-                    error_message TEXT,
-                    step_reached TEXT,
-                    form_data TEXT,
-                    FOREIGN KEY (job_id) REFERENCES jobs (job_id)
-                )
-            ''')
-            
-            # Create indexes for better performance
-            self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)')
-            self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_jobs_application_date ON jobs(application_date)')
-            self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_form_fields_job_id ON form_fields(job_id)')
-            self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_application_attempts_job_id ON application_attempts(job_id)')
-            
-            self.conn.commit()
-            logger.info("Database setup completed successfully")
-            self.db_enabled = True
-            
-        except Exception as e:
-            logger.error(f"Database setup error: {str(e)}")
-            logger.warning("Continuing without database functionality")
-            self.db_enabled = False
 
     def get_database_stats(self):
         """Get statistics about the database"""
         try:
-            self.cursor.execute('SELECT COUNT(*), COUNT(DISTINCT job_id) FROM jobs')
-            total_jobs, unique_jobs = self.cursor.fetchone()
-            
-            self.cursor.execute('SELECT COUNT(*) FROM form_fields')
-            total_fields = self.cursor.fetchone()[0]
-            
-            self.cursor.execute('SELECT COUNT(*) FROM jobs WHERE status = "APPLIED"')
-            applied_jobs = self.cursor.fetchone()[0]
+            self.db.get_stats()
             
             logger.info(f"""
 Database Statistics:
-- Total Jobs: {total_jobs}
-- Unique Jobs: {unique_jobs}
-- Total Form Fields: {total_fields}
-- Successfully Applied: {applied_jobs}
+- Total Jobs: {self.db.total_jobs}
+- Unique Jobs: {self.db.unique_jobs}
+- Total Form Fields: {self.db.total_fields}
+- Successfully Applied: {self.db.applied_jobs}
             """)
             
         except Exception as e:
             logger.error(f"Error getting database stats: {str(e)}")
-
-    def setup_driver(self):
-        """Setup Chrome WebDriver"""
-        try:
-            chrome_options = Options()
-            chrome_options.add_argument("--start-maximized")
-            chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            
-            service = Service('/usr/local/bin/chromedriver')
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            logger.info("Chrome WebDriver setup completed")
-            
-        except Exception as e:
-            logger.error(f"Failed to setup Chrome WebDriver: {str(e)}")
-            raise
 
     def load_applied_jobs(self):
         """Load already applied jobs from database"""
@@ -184,12 +57,7 @@ Database Statistics:
             self.applied_jobs = set()
             
             # Get all job IDs with status 'APPLIED'
-            self.cursor.execute('SELECT job_id FROM jobs WHERE status = "APPLIED"')
-            applied_jobs = self.cursor.fetchall()
-            
-            # Add to set
-            for (job_id,) in applied_jobs:
-                self.applied_jobs.add(job_id)
+            self.applied_jobs = self.db.get_applied_jobs()
             
             logger.info(f"Loaded {len(self.applied_jobs)} previously applied jobs")
             
@@ -199,10 +67,6 @@ Database Statistics:
 
     def is_already_applied(self, job_url):
         """Check if we've already applied to this job"""
-        if not hasattr(self, 'db_enabled') or not self.db_enabled:
-            logger.warning("Database is disabled, assuming not applied")
-            return False
-            
         try:
             # Extract job ID from URL
             job_id = job_url.split('jobs/view/')[-1].split('?')[0]
@@ -213,10 +77,7 @@ Database Statistics:
                 return True
             
             # Then check database
-            self.cursor.execute('SELECT status FROM jobs WHERE job_id = ?', (job_id,))
-            result = self.cursor.fetchone()
-            
-            if result and result[0] == "APPLIED":
+            if self.db.is_job_applied(job_id):
                 # Add to memory cache
                 self.applied_jobs.add(job_id)
                 logger.info(f"Already applied to job {job_id} (found in database)")
@@ -231,131 +92,89 @@ Database Statistics:
 
     def apply_to_jobs(self, max_applications=None):
         """Apply to jobs"""
-        applications_submitted = 0
         try:
-            # Wait for job cards to be present
-            job_cards = self.wait.until(EC.presence_of_all_elements_located(
-                (By.CSS_SELECTOR, "div.job-card-container")))
+            if max_applications is None:
+                max_applications = self.max_jobs
+            
+            logger.info(f"Starting to apply for up to {max_applications} jobs")
+            applications_submitted = 0
+            
+            # Wait for job listings to be visible
+            job_listings_selector = ".jobs-search-results__list"
+            try:
+                job_listings = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, job_listings_selector))
+                )
+                logger.info("Found job listings container")
+            except TimeoutException:
+                logger.error("Could not find job listings container")
+                return False
+            
+            # Get all job cards
+            job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".job-card-container")
+            if not job_cards:
+                logger.warning("No job cards found")
+                return False
             
             logger.info(f"Found {len(job_cards)} job cards")
             
-            for job_card in job_cards:
+            for index, job_card in enumerate(job_cards):
+                if applications_submitted >= max_applications:
+                    logger.info(f"Reached maximum applications limit ({max_applications})")
+                    break
+                
                 try:
-                    # Check for security verification before each action
-                    if self.handle_security_check():
-                        continue  # Retry this job card after security check
-                    
-                    # Click the job card to view details
-                    self.driver.execute_script("arguments[0].click();", job_card)
-                    time.sleep(2)
-                    
-                    # Check for security verification after clicking
-                    if self.handle_security_check():
+                    # Check if already applied
+                    if self.check_job_status(job_card):
+                        logger.info("Already applied to this job, skipping")
                         continue
+                    
+                    # Click on job card
+                    self.driver.execute_script("arguments[0].click();", job_card)
+                    time.sleep(2)  # Wait for job details to load
                     
                     # Get job details
-                    job_url = self.driver.current_url
-                    job_id = job_url.split('jobs/view/')[-1].split('?')[0]
+                    job_title = job_card.find_element(By.CSS_SELECTOR, ".job-card-list__title").text
+                    company_name = job_card.find_element(By.CSS_SELECTOR, ".job-card-container__company-name").text
                     
-                    try:
-                        company_name = self.driver.find_element(By.CSS_SELECTOR, "[data-test-employer-name]").text
-                        job_title = self.driver.find_element(By.CSS_SELECTOR, "[data-test-job-title]").text
-                    except:
-                        logger.error("Could not find job details")
+                    logger.info(f"Processing job: {job_title} at {company_name}")
+                    
+                    # Check for Easy Apply button
+                    easy_apply_button = self.check_easy_apply_button()
+                    if not easy_apply_button:
+                        logger.info("No Easy Apply button found, skipping")
                         continue
                     
-                    # Check if already applied
-                    if self.is_already_applied(job_url):
-                        continue
-                    
-                    # Look for any apply button first
+                    # Click Easy Apply and process application
                     try:
-                        apply_button = self.wait.until(EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, "button[data-control-name*='apply']")))
+                        self.driver.execute_script("arguments[0].click();", easy_apply_button)
+                        time.sleep(2)  # Wait for application modal
                         
-                        # Check if it's an Easy Apply button
-                        if "easy-apply" not in apply_button.get_attribute("class").lower():
-                            logger.info("Found regular apply button, not Easy Apply")
-                            self.save_job_details(
-                                job_id,
-                                company_name,
-                                job_title,
-                                job_url,
-                                status="SKIPPED",
-                                failure_reason="Not an Easy Apply job"
-                            )
-                            continue
-                        
-                        logger.info("Found Easy Apply button")
-                        
-                        # Click the Easy Apply button
-                        self.driver.execute_script("arguments[0].click();", apply_button)
-                        
-                        # Handle the application process
                         if self.handle_easy_apply_process():
                             applications_submitted += 1
-                            self.save_job_details(
-                                job_id,
-                                company_name,
-                                job_title,
-                                job_url,
-                                status="APPLIED"
-                            )
-                            logger.info(f"Successfully applied to job {applications_submitted}")
-                            
-                            if max_applications and applications_submitted >= max_applications:
-                                logger.info(f"Reached maximum applications limit ({max_applications})")
-                                break
+                            logger.info(f"Successfully applied to job ({applications_submitted}/{max_applications})")
                         else:
-                            # Log failed application
-                            self.save_job_details(
-                                job_id, 
-                                company_name, 
-                                job_title, 
-                                job_url, 
-                                status="FAILED",
-                                failure_reason="Failed during application process"
-                            )
+                            logger.warning("Failed to complete application, moving to next job")
                         
-                    except TimeoutException:
-                        logger.info("No apply button found")
-                        self.save_job_details(
-                            job_id,
-                            company_name,
-                            job_title,
-                            job_url,
-                            status="SKIPPED",
-                            failure_reason="No apply button found"
-                        )
+                    except Exception as e:
+                        logger.error(f"Error in application process: {str(e)}")
                         continue
                     
                 except Exception as e:
-                    error_msg = str(e)
-                    logger.error(f"Error processing job card: {error_msg}")
-                    # Try to save failed job if we have the ID
-                    if 'job_id' in locals():
-                        self.save_job_details(
-                            job_id,
-                            company_name if 'company_name' in locals() else "Unknown",
-                            job_title if 'job_title' in locals() else "Unknown",
-                            job_url if 'job_url' in locals() else "Unknown",
-                            status="ERROR",
-                            failure_reason=error_msg
-                        )
+                    logger.error(f"Error processing job card {index}: {str(e)}")
                     continue
                 
-            return applications_submitted
+                time.sleep(2)  # Wait between applications
+            
+            logger.info(f"Completed job applications. Submitted {applications_submitted} applications")
+            return True
             
         except Exception as e:
             logger.error(f"Error in apply_to_jobs: {str(e)}")
-            return applications_submitted
+            return False
 
     def save_job_details(self, job_id, company_name, job_title, job_url, status="PENDING", failure_reason=None):
         """Save job application details to database"""
-        if not hasattr(self, 'db_enabled') or not self.db_enabled:
-            logger.warning("Database is disabled, skipping save operation")
-            return
-            
         try:
             # Get additional job details if available
             try:
@@ -390,19 +209,8 @@ Database Statistics:
                 is_remote = False
                 
             # Insert or update job details
-            self.cursor.execute('''
-                INSERT OR REPLACE INTO jobs (
-                    job_id, company_name, company_url, job_title, job_description,
-                    job_location, salary_range, application_date, last_updated,
-                    status, failure_reason, job_url, num_applicants, is_remote, easy_apply
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                job_id, company_name, company_url, job_title, job_description,
-                job_location, salary_range, datetime.now(), datetime.now(),
-                status, failure_reason, job_url, num_applicants, is_remote, True
-            ))
+            self.db.save_job_details(job_id, company_name, job_title, job_description, job_location, salary_range, job_url, num_applicants, is_remote, status, failure_reason)
             
-            self.conn.commit()
             logger.info(f"Saved job details for {job_title} at {company_name} - Status: {status}")
             if failure_reason:
                 logger.warning(f"Failed to apply: {failure_reason}")
@@ -413,20 +221,8 @@ Database Statistics:
 
     def log_application_attempt(self, job_id, status, error_message=None, step_reached=None, form_data=None):
         """Log an application attempt"""
-        if not hasattr(self, 'db_enabled') or not self.db_enabled:
-            logger.warning("Database is disabled, skipping log operation")
-            return
-            
         try:
-            self.cursor.execute('''
-                INSERT INTO application_attempts (
-                    job_id, attempt_date, status, error_message, step_reached, form_data
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                job_id, datetime.now(), status, error_message, step_reached,
-                json.dumps(form_data) if form_data else None
-            ))
-            self.conn.commit()
+            self.db.log_application_attempt(job_id, status, error_message, step_reached, form_data)
             logger.info(f"Logged application attempt for job {job_id} - Status: {status}")
         except Exception as e:
             logger.error(f"Error logging application attempt: {str(e)}")
@@ -434,16 +230,8 @@ Database Statistics:
 
     def save_form_field(self, job_id, field_type, field_label, field_options=None, is_required=False):
         """Save form field to database"""
-        if not hasattr(self, 'db_enabled') or not self.db_enabled:
-            logger.warning("Database is disabled, skipping form field save")
-            return
-            
         try:
-            self.cursor.execute('''
-                INSERT INTO form_fields (job_id, field_type, field_label, field_options, is_required)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (job_id, field_type, field_label, str(field_options) if field_options else None, is_required))
-            self.conn.commit()
+            self.db.save_form_field(job_id, field_type, field_label, field_options, is_required)
             logger.info(f"Saved form field: {field_label}")
         except Exception as e:
             logger.error(f"Error saving form field: {str(e)}")
@@ -635,255 +423,6 @@ Database Statistics:
             # If no label found, try to get aria-label or name
             return field.get_attribute("aria-label") or field.get_attribute("name") or "Unknown Field"
 
-    def solve_orientation_captcha(self):
-        """Attempt to solve orientation-based image CAPTCHAs"""
-        try:
-            # Get all images in the current iframe context
-            image_elements = self.driver.find_elements(By.TAG_NAME, "img")
-            
-            # Get the instruction text
-            instruction_elements = self.driver.find_elements(By.XPATH, 
-                "//div[contains(text(), 'Pick the image') or contains(text(), 'Select the image')]")
-            
-            if instruction_elements:
-                instruction = instruction_elements[0].text.lower()
-                logger.info(f"CAPTCHA instruction: {instruction}")
-            else:
-                logger.warning("Could not find instruction text")
-                return False
-            
-            # Process each image
-            for idx, img_element in enumerate(image_elements):
-                try:
-                    # Skip if not displayed
-                    if not img_element.is_displayed():
-                        continue
-                        
-                    # Get image source
-                    img_src = img_element.get_attribute('src')
-                    if not img_src or not img_src.startswith('data:image'):
-                        continue
-                        
-                    # Convert base64 to image
-                    img_data = base64.b64decode(img_src.split(',')[1])
-                    img = Image.open(io.BytesIO(img_data))
-                    
-                    # Convert to OpenCV format
-                    cv_img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-                    
-                    # Detect orientation using image processing
-                    orientation = self.detect_orientation(cv_img)
-                    logger.info(f"Image {idx} orientation: {orientation}")
-                    
-                    # Check if this image matches the instruction
-                    if "up" in instruction and orientation == "up":
-                        img_element.click()
-                        logger.info(f"Clicked image {idx} that appears to be oriented upright")
-                        time.sleep(1)
-                        
-                except Exception as e:
-                    logger.error(f"Error processing image {idx}: {str(e)}")
-                    continue
-            
-            # After processing all images, click verify
-            verify_button = self.driver.find_element(By.XPATH, "//button[text()='Verify']")
-            verify_button.click()
-            time.sleep(2)
-            
-            # Check if verification succeeded
-            self.driver.switch_to.default_content()
-            if self.wait_for_verification_completion():
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error solving orientation CAPTCHA: {str(e)}")
-            return False
-
-    def detect_orientation(self, img):
-        """Detect image orientation using OpenCV"""
-        try:
-            # Convert to grayscale
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
-            # Edge detection
-            edges = cv2.Canny(gray, 50, 150)
-            
-            # Find contours
-            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            if not contours:
-                return "unknown"
-                
-            # Get the largest contour
-            largest_contour = max(contours, key=cv2.contourArea)
-            
-            # Get bounding box
-            rect = cv2.minAreaRect(largest_contour)
-            box = cv2.boxPoints(rect)
-            box = np.int0(box)
-            
-            # Calculate center of mass
-            M = cv2.moments(largest_contour)
-            if M["m00"] != 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-            else:
-                return "unknown"
-                
-            # Analyze the distribution of pixels relative to center
-            height, width = img.shape[:2]
-            if cy < height/2:
-                return "up"
-            else:
-                return "down"
-                
-        except Exception as e:
-            logger.error(f"Error detecting orientation: {str(e)}")
-            return "unknown"
-
-    def check_for_security_verification(self):
-        """Check and handle LinkedIn security verification"""
-        try:
-            # Wait for any iframe to be present
-            self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
-            
-            # Find all iframes
-            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
-            logger.info(f"Found {len(iframes)} iframes")
-            
-            for iframe in iframes:
-                try:
-                    # Switch to iframe
-                    self.driver.switch_to.frame(iframe)
-                    logger.info("Switched to iframe")
-                    
-                    # First look for verification text to confirm we're in the right iframe
-                    verification_texts = [
-                        "//h1[contains(text(), 'Verification')]",
-                        "//div[contains(text(), 'Please solve this puzzle')]",
-                        "//div[contains(text(), 'security check')]"
-                    ]
-                    
-                    if not any(len(self.driver.find_elements(By.XPATH, text)) > 0 for text in verification_texts):
-                        logger.debug("Not a verification iframe, skipping")
-                        continue
-                        
-                    logger.info("Found verification iframe")
-                    
-                    # Look for the verify button
-                    verify_selectors = [
-                        "//button[text()='Verify']",
-                        "//button[contains(text(), 'Verify')]",
-                        "//button[@type='submit']"
-                    ]
-                    
-                    verify_button = None
-                    for selector in verify_selectors:
-                        try:
-                            elements = self.driver.find_elements(By.XPATH, selector)
-                            for element in elements:
-                                if element.is_displayed() and element.text.strip().lower() == "verify":
-                                    verify_button = element
-                                    break
-                            if verify_button:
-                                break
-                        except:
-                            continue
-                    
-                    if verify_button:
-                        logger.info("Found verify button")
-                        
-                        # Check for puzzle elements before clicking
-                        puzzle_images = self.driver.find_elements(By.TAG_NAME, "img")
-                        if len(puzzle_images) > 1:  # More than one image indicates a puzzle
-                            logger.info("Found puzzle images, attempting to solve")
-                            # Process puzzle images with OpenCV
-                            if self.solve_orientation_captcha():
-                                logger.info("Puzzle solved successfully")
-                                return False
-                        else:
-                            # Simple verification, just click the button
-                            logger.info("Simple verification, clicking verify button")
-                            verify_button.click()
-                            time.sleep(2)
-                            
-                            # Check if verification succeeded
-                            self.driver.switch_to.default_content()
-                            if self.wait_for_verification_completion():
-                                return False
-                            
-                            # If not succeeded, switch back to iframe
-                            self.driver.switch_to.frame(iframe)
-                    
-                    # If we get here, either no verify button found or verification failed
-                    logger.info("Automated verification failed, waiting for manual completion")
-                    self.wait_for_verification_completion()
-                    return True
-                    
-                except Exception as e:
-                    logger.error(f"Error processing iframe: {str(e)}")
-                    continue
-                    
-                finally:
-                    try:
-                        self.driver.switch_to.default_content()
-                    except:
-                        pass
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error in security verification: {str(e)}")
-            try:
-                self.driver.switch_to.default_content()
-            except:
-                pass
-            return False
-
-    def wait_for_verification_completion(self, timeout=300):  # 5 minutes timeout
-        """Wait until the security verification is completed"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                # Check if we're back on a normal LinkedIn page
-                normal_page_indicators = [
-                    "//div[contains(@class, 'jobs-search-box')]",
-                    "[data-control-name='feed_nav_home']",
-                    ".feed-identity-module",
-                    ".search-global-typeahead__input"
-                ]
-                
-                for indicator in normal_page_indicators:
-                    if len(self.driver.find_elements(By.XPATH, indicator)) > 0:
-                        logger.info("Verification completed - back on normal LinkedIn page")
-                        time.sleep(2)  # Give a moment for page to fully load
-                        return True
-                
-                # Check if we're still on verification page
-                verification_indicators = [
-                    "//iframe",
-                    "//div[contains(text(), 'verification')]",
-                    "//div[contains(text(), 'security check')]",
-                    "//button[contains(text(), 'Verify')]"
-                ]
-                
-                if not any(len(self.driver.find_elements(By.XPATH, ind)) > 0 for ind in verification_indicators):
-                    logger.info("No verification elements found - assuming completed")
-                    time.sleep(2)
-                    return True
-                
-                logger.info("Still waiting for verification to complete...")
-                time.sleep(5)
-                
-            except Exception as e:
-                logger.error(f"Error while waiting for verification: {str(e)}")
-                time.sleep(5)
-        
-        logger.warning("Verification wait timeout reached")
-        return False
-
     def handle_security_check(self):
         """Handle security check if encountered"""
         try:
@@ -949,96 +488,116 @@ Database Statistics:
             logger.error(f"Error checking login status: {str(e)}")
             return False
 
-    def run(self, keywords, location, max_jobs=25):
-        """Run the job application process"""
+    def setup_driver(self):
+        """Setup Chrome WebDriver"""
         try:
-            # Step 1: Login with username/password
-            logger.info("Step 1: Logging in with username/password...")
-            if not self.login_handler.login():
+            logger.info("Setting up Chrome WebDriver...")
+            self.driver = ChromeSetup.initialize_driver()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to setup Chrome WebDriver: {str(e)}")
+            return False
+
+    def run(self):
+        """Run the LinkedIn auto apply process"""
+        try:
+            # Initialize components
+            self.login = LinkedInLogin(self.driver)
+            self.jobs = LinkedInJobs(self.driver)
+            
+            # Login to LinkedIn
+            if not self.login.login():
                 logger.error("Failed to login")
-                return
+                return False
+                
+            # Search for jobs
+            if not self.jobs.search_jobs():
+                logger.error("Failed to search for jobs")
+                return False
+                
+            # Start applying to jobs
+            self.apply_to_jobs()
             
-            logger.info("Successfully logged in")
-            time.sleep(3)  # Wait after login
-            
-            while True:  # Main application loop
-                try:
-                    # Step 2: Search and apply for Easy Apply jobs
-                    logger.info(f"Step 2: Searching for {keywords} jobs in {location}...")
-                    search_result = self.jobs_handler.search_jobs(keywords, location)
-                    if not search_result:
-                        logger.warning("Job search verification failed. Current URL: " + self.driver.current_url)
-                        logger.warning("Attempting to continue anyway...")
-                        time.sleep(5)  # Extra wait time if search verification fails
-                    
-                    # Get job listings
-                    logger.info("Getting job listings...")
-                    jobs = self.jobs_handler.get_job_listings(max_jobs)
-                    if not jobs:
-                        logger.warning("No jobs found. Current page state:")
-                        logger.warning("URL: " + self.driver.current_url)
-                        try:
-                            # Try to find any job-related elements for debugging
-                            job_elements = self.driver.find_elements(By.CSS_SELECTOR, "div[class*='job']")
-                            logger.info(f"Found {len(job_elements)} elements with 'job' in class name")
-                        except Exception as e:
-                            logger.error(f"Error checking for job elements: {str(e)}")
-                        return
-                        
-                    logger.info(f"Found {len(jobs)} jobs to apply to")
-                    time.sleep(3)  # Wait after getting listings
-                    
-                    # Apply to each job
-                    for job in jobs:
-                        try:
-                            logger.info(f"Attempting to apply to: {job['title']} at {job['company']}")
-                            # Click on job
-                            self.jobs_handler.scroll_to_job(job['element'])
-                            if not self.jobs_handler.click_job(job['element']):
-                                # If job click failed (possibly due to page not found)
-                                logger.warning("Failed to click job, skipping to next...")
-                                continue
-                            
-                            time.sleep(3)  # Wait after job click
-                            
-                            # Try to apply
-                            if self.apply_handler.apply_to_job(job):
-                                logger.info(f"Successfully applied to {job['title']} at {job['company']}")
-                            else:
-                                logger.warning(f"Failed to apply to {job['title']} at {job['company']}")
-                                
-                            time.sleep(3)  # Wait between applications
-                                
-                        except Exception as e:
-                            logger.error(f"Error applying to job: {str(e)}")
-                            continue
-                            
-                    # If we've processed all jobs without errors, break the main loop
-                    break
-                    
-                except Exception as e:
-                    logger.error(f"Error in job search/apply process: {str(e)}")
-                    # Try to go back to jobs page
-                    try:
-                        self.driver.get("https://www.linkedin.com/jobs/")
-                        time.sleep(3)  # Wait after navigation
-                    except:
-                        pass
-                    continue  # Retry the whole process
+            return True
             
         except Exception as e:
-            logger.error(f"Error in run process: {str(e)}")
+            logger.error(f"Error in auto apply process: {str(e)}")
+            return False
+            
         finally:
-            logger.info("Job application process completed")
+            self.close()
+
+    def wait_for_element(self, by, selector, timeout=10):
+        """Wait for an element to be present"""
+        try:
+            self.wait.until(EC.presence_of_element_located((by, selector)))
+            return True
+        except TimeoutException:
+            return False
+
+    def check_easy_apply_button(self):
+        """Check if Easy Apply button is present and clickable"""
+        try:
+            # Check for Easy Apply button with various selectors
+            button_selectors = [
+                "button.jobs-apply-button[aria-label*='Easy Apply']",
+                "button[aria-label*='Easy Apply']",
+                ".jobs-apply-button",
+                "[data-control-name='jobdetails_topcard_inapply']"
+            ]
+            
+            for selector in button_selectors:
+                buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                for button in buttons:
+                    if button.is_displayed() and "Easy Apply" in button.get_attribute("innerHTML"):
+                        return button
+            
+            # If no Easy Apply button found, log the reason
+            apply_buttons = self.driver.find_elements(By.CSS_SELECTOR, ".jobs-apply-button")
+            if apply_buttons:
+                for button in apply_buttons:
+                    logger.info(f"Found non-Easy Apply button: {button.get_attribute('innerHTML')}")
+            else:
+                logger.info("No apply button found on page")
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error checking Easy Apply button: {str(e)}")
+            return None
+
+    def check_job_status(self, job_card):
+        """Check if job has already been applied to"""
+        try:
+            # Check for "Applied" status in various locations
+            status_selectors = [
+                ".job-card-container__footer-item",
+                ".artdeco-entity-lockup__subtitle",
+                ".job-card-list__footer-wrapper",
+                ".jobs-applied-badge"
+            ]
+            
+            for selector in status_selectors:
+                elements = job_card.find_elements(By.CSS_SELECTOR, selector)
+                for element in elements:
+                    if "Applied" in element.text:
+                        logger.info("Found 'Applied' status on job card")
+                        return True
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error checking job status: {str(e)}")
+            return False
 
 def main():
     try:
+        logger.info("Initializing LinkedIn Auto Apply bot...")
         bot = LinkedInAutoApply()
-        bot.run(bot.job_search_keywords, bot.job_search_location, bot.max_jobs)
+        bot.run()
     except Exception as e:
         logger.error(f"Error in main process: {str(e)}")
     finally:
-        logger.info("Process finished")
-
+        logger.info("Process completed")
+    
 if __name__ == "__main__":
     main()
