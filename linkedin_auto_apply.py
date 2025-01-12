@@ -1,7 +1,12 @@
 import os
 import time
+import sys
 import logging
 from dotenv import load_dotenv
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import WebDriverException
 
 from utils.logger import setup_logger
 from utils.chrome_setup import ChromeSetup
@@ -465,6 +470,30 @@ Database Statistics:
             except Exception as e:
                 logger.error(f"Error closing browser: {str(e)}")
 
+    def check_browser_open(self):
+        """Check if browser is still open"""
+        try:
+            # Try to get current url - will fail if browser is closed
+            self.driver.current_url
+            return True
+        except WebDriverException:
+            logger.error("Browser was closed by user")
+            self.cleanup()
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"Error checking browser status: {str(e)}")
+            self.cleanup()
+            sys.exit(1)
+        return False
+
+    def cleanup(self):
+        """Clean up resources"""
+        if self.driver:
+            try:
+                self.driver.quit()
+            except:
+                pass
+
     def check_if_logged_in(self):
         """Check if we are already logged in"""
         try:
@@ -499,20 +528,24 @@ Database Statistics:
             self.jobs = LinkedInJobs(self.driver)
             
             # Start from login page
+            self.check_browser_open()
             self.driver.get("https://www.linkedin.com/login")
             time.sleep(3)
             
             # Login to LinkedIn
+            self.check_browser_open()
             if not self.login.login():
                 logger.error("Failed to login")
                 return False
                 
             # Search for jobs
+            self.check_browser_open()
             if not self.jobs.search_jobs():
                 logger.error("Failed to search for jobs")
                 return False
                 
             # Start applying to jobs
+            self.check_browser_open()
             self.apply_to_jobs()
             
             return True
@@ -522,11 +555,7 @@ Database Statistics:
             return False
             
         finally:
-            if self.driver:
-                try:
-                    self.driver.quit()
-                except:
-                    pass
+            self.cleanup()
 
     def wait_for_element(self, by, selector, timeout=10):
         """Wait for an element to be present"""
@@ -601,4 +630,12 @@ def main():
         logger.info("Process completed")
     
 if __name__ == "__main__":
-    main()
+    try:
+        bot = LinkedInAutoApply()
+        bot.run()
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Fatal error: {str(e)}")
+        sys.exit(1)
